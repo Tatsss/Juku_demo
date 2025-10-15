@@ -4,6 +4,7 @@ import requests
 import logging
 import random
 import base64
+import tempfile
 from fastapi import FastAPI, Request
 from pydantic import BaseModel
 from openai import OpenAI
@@ -116,6 +117,101 @@ async def webhook(body: LineWebhookBody):
             logger.info(f"📝: {preview}")
             logger.info("✅ 🖼 webhook image flow completed")
             return {"status": "success"}
+
+        if mtype == "audio":
+            try:
+                # 1) LINE から音声バイナリ取得
+                content_url = f"https://api-data.line.me/v2/bot/message/{event.message['id']}/content"
+                res = requests.get(content_url, headers={"Authorization": f"Bearer {LINE_ACCESS_TOKEN}"}, timeout=20)
+                res.raise_for_status()
+                mime = res.headers.get("Content-Type", "audio/m4a").split(";")[0]
+
+                # 2) 一時ファイルへ保存（LINEは m4a が多い）
+                suffix = ".m4a" if "m4a" in mime or "aac" in mime or "mpeg" in mime else ".mp4"
+                with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+                    tmp.write(res.content)
+                    audio_path = tmp.name
+
+                # 3) OpenAI で音声→テキスト化
+                client = OpenAI()
+                with open(audio_path, "rb") as f:
+                    tr = client.audio.transcriptions.create(
+                        model="gpt-4o-mini-transcribe",  # 速度/コスト重視。精度優先なら "whisper-1"
+                        file=f
+                    )
+                user_message = (tr.text or "").strip()
+                logger.info(f"🎧 transcript first10: {user_message[:10]}")
+
+                # 4) 既存のテキスト応答ロジックへ流す（text分岐と同等）
+                user_id = event.source.get("userId") or event.source.get("groupId") or event.source.get("roomId")
+                profile_bullets = get_user_profile(user_id)
+                running_summary, last_idx = get_running_summary(user_id)
+
+                try:
+                    recent_history = db.get_recent_history(user_id, limit=30)
+                except AttributeError:
+                    recent_history = []
+                recent_turns = [(h["role"], h["content"]) for h in recent_history] + [("user", user_message)]
+
+                SYSTEM_PROMPT = "あなたは有能なアシスタントです。丁寧かつ簡潔に日本語で回答します。"
+                messages = build_messages(
+                    system_prompt=SYSTEM_PROMPT,
+                    profile_bullets=profile_bullets,
+                    running_summary=running_summary,
+                    recent_turns=recent_turns,
+                )
+
+                ai_response = generate_chat(messages, max_tokens=1024, temperature=0.3)
+                db.log_conversation(user_id, user_message, ai_response, response_id=None)
+
+                # 5) 返信
+                requests.post(
+                    "https://api.line.me/v2/bot/message/reply",
+                    headers={
+                        "Content-Type": "application/json",
+                        "Authorization": f"Bearer {LINE_ACCESS_TOKEN}"
+                    },
+                    json={
+                        "replyToken": event.replyToken,
+                        "messages": [{"type": "text", "text": ai_response}]
+                    },
+                    timeout=15
+                ).raise_for_status()
+
+                logger.info("✅ 🔊 webhook audio flow completed")
+                return {"status": "success"}
+
+            except requests.RequestException:
+                logger.exception("LINE audio fetch failed")
+                requests.post(
+                    "https://api.line.me/v2/bot/message/reply",
+                    headers={
+                        "Content-Type": "application/json",
+                        "Authorization": f"Bearer {LINE_ACCESS_TOKEN}"
+                    },
+                    json={
+                        "replyToken": event.replyToken,
+                        "messages": [{"type": "text", "text": "音声の取得に失敗しました。もう一度お送りください。"}]
+                    },
+                    timeout=15
+                )
+                return {"status": "fetch-failed"}
+
+            except Exception:
+                logger.exception("audio transcription failed")
+                requests.post(
+                    "https://api.line.me/v2/bot/message/reply",
+                    headers={
+                        "Content-Type": "application/json",
+                        "Authorization": f"Bearer {LINE_ACCESS_TOKEN}"
+                    },
+                    json={
+                        "replyToken": event.replyToken,
+                        "messages": [{"type": "text", "text": "音声の変換に失敗しました。もう一度お試しください。"}]
+                    },
+                    timeout=15
+                )
+                return {"status": "transcribe-failed"}
 
         if mtype == "text":
             user_id = event.source["userId"]
