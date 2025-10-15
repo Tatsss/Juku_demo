@@ -112,7 +112,8 @@ async def webhook(body: LineWebhookBody):
                     "messages": [{"type": "text", "text": result_text[:4900]}]
                 }
             )
-
+            preview = (result_text or "")[:10]
+            logger.info(f"📝: {preview}")
             logger.info("✅ 🖼 webhook image flow completed")
             return {"status": "success"}
 
