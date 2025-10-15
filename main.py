@@ -3,7 +3,7 @@ import uvicorn
 import requests
 import logging
 import random
-import base64, requests
+import base64
 from fastapi import FastAPI, Request
 from pydantic import BaseModel
 from openai import OpenAI
@@ -75,12 +75,16 @@ async def webhook(body: LineWebhookBody):
 
         if mtype == "image":
             # 画像バイナリ取得
-            content_url = f"https://api-data.line.me/v2/bot/message/{event.message.id}/content"
-            res = requests.get(content_url, headers={"Authorization": f"Bearer {LINE_ACCESS_TOKEN}"})
+            content_url = f"https://api-data.line.me/v2/bot/message/{event.message['id']}/content"
+            res = requests.get(content_url, headers={"Authorization": f"Bearer {LINE_ACCESS_TOKEN}"}, timeout=20)
+            res.raise_for_status()
+
+            # Content-Type から MIME を決定（例: image/jpeg, image/png）
+            mime = res.headers.get("Content-Type", "image/jpeg").split(";")[0]
             image_bytes = res.content
 
             # data URL化
-            data_url = "data:image/jpeg;base64," + base64.b64encode(image_bytes).decode("utf-8")
+            data_url = f"data:{mime};base64," + base64.b64encode(image_bytes).decode("utf-8")
 
             # OpenAI Visionモデルで解析
             client = OpenAI()
@@ -90,7 +94,7 @@ async def webhook(body: LineWebhookBody):
                     "role": "user",
                     "content": [
                         {"type": "input_text", "text": "画像に何が写っているか日本語で説明してください。"},
-                        {"type": "input_image", "image_url": {"url": data_url}}
+                        {"type": "input_image", "image_url": {"url": data_url, "detail": "high"}}
                     ]
                 }]
             )
@@ -104,8 +108,8 @@ async def webhook(body: LineWebhookBody):
                     "Authorization": f"Bearer {LINE_ACCESS_TOKEN}"
                 },
                 json={
-                    "replyToken": event.reply_token,
-                    "messages": [{"type": "text", "text": result_text}]
+                    "replyToken": event.replyToken,
+                    "messages": [{"type": "text", "text": result_text[:4900]}]
                 }
             )
 
