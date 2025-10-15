@@ -94,7 +94,7 @@ async def webhook(body: LineWebhookBody):
                     "role": "user",
                     "content": [
                         {"type": "input_text", "text": "画像に何が写っているか日本語で説明してください。"},
-                        {"type": "input_image", "image_url": {"url": data_url, "detail": "high"}}
+                        {"type": "input_image", "image_url": data_url}
                     ]
                 }]
             )
