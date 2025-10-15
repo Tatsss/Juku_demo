@@ -17,6 +17,7 @@ openai_client = OpenAIClient()
 db = FirestoreDB()
 
 LINE_ACCESS_TOKEN = os.getenv("LINE_ACCESS_TOKEN")
+IMAGE_PROMPT = os.getenv("IMAGE_PROMPT")
 STICKER_REPLIES = [
     os.getenv("LINE_STICKER_REPLY01", "").strip(),
     os.getenv("LINE_STICKER_REPLY02", "").strip(),
@@ -94,7 +95,7 @@ async def webhook(body: LineWebhookBody):
                 input=[{
                     "role": "user",
                     "content": [
-                        {"type": "input_text", "text": "画像に何が写っているか日本語で説明してください。"},
+                        {"type": "input_text", "text": IMAGE_PROMPT},
                         {"type": "input_image", "image_url": data_url}
                     ]
                 }]
