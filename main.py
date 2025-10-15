@@ -3,8 +3,10 @@ import uvicorn
 import requests
 import logging
 import random
+import base64, requests
 from fastapi import FastAPI, Request
 from pydantic import BaseModel
+from openai import OpenAI
 from openai_client import OpenAIClient, build_messages, generate_chat, estimate_tokens, summarize_text_block
 from firestore_db import FirestoreDB, get_user_profile, get_running_summary, update_running_summary
 from typing import List, Tuple
@@ -50,48 +52,6 @@ async def webhook(body: LineWebhookBody):
 
     event = body.events[0]
 
-    if event.message.type == "image":
-        import base64, requests
-        from openai import OpenAI
-
-        # 画像バイナリ取得
-        content_url = f"https://api-data.line.me/v2/bot/message/{event.message.id}/content"
-        res = requests.get(content_url, headers={"Authorization": f"Bearer {LINE_ACCESS_TOKEN}"})
-        image_bytes = res.content
-
-        # data URL化
-        data_url = "data:image/jpeg;base64," + base64.b64encode(image_bytes).decode("utf-8")
-
-        # OpenAI Visionモデルで解析
-        client = OpenAI()
-        response = client.responses.create(
-            model="gpt-4o",
-            input=[{
-                "role": "user",
-                "content": [
-                    {"type": "input_text", "text": "画像に何が写っているか日本語で説明してください。"},
-                    {"type": "input_image", "image_url": {"url": data_url}}
-                ]
-            }]
-        )
-        result_text = response.output_text
-
-        # LINE返信
-        requests.post(
-            "https://api.line.me/v2/bot/message/reply",
-            headers={
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {LINE_ACCESS_TOKEN}"
-            },
-            json={
-                "replyToken": event.reply_token,
-                "messages": [{"type": "text", "text": result_text}]
-            }
-        )
-
-        logger.info("✅ 🖼 webhook image flow completed")
-        return {"status": "success"}
-
     if event.type == "message":
         mtype = event.message.get("type")
 
@@ -111,6 +71,45 @@ async def webhook(body: LineWebhookBody):
             }
 
             requests.post("https://api.line.me/v2/bot/message/reply", headers=headers, json=payload)
+            return {"status": "success"}
+
+        if mtype == "image":
+            # 画像バイナリ取得
+            content_url = f"https://api-data.line.me/v2/bot/message/{event.message.id}/content"
+            res = requests.get(content_url, headers={"Authorization": f"Bearer {LINE_ACCESS_TOKEN}"})
+            image_bytes = res.content
+
+            # data URL化
+            data_url = "data:image/jpeg;base64," + base64.b64encode(image_bytes).decode("utf-8")
+
+            # OpenAI Visionモデルで解析
+            client = OpenAI()
+            response = client.responses.create(
+                model="gpt-4o",
+                input=[{
+                    "role": "user",
+                    "content": [
+                        {"type": "input_text", "text": "画像に何が写っているか日本語で説明してください。"},
+                        {"type": "input_image", "image_url": {"url": data_url}}
+                    ]
+                }]
+            )
+            result_text = response.output_text
+
+            # LINE返信
+            requests.post(
+                "https://api.line.me/v2/bot/message/reply",
+                headers={
+                    "Content-Type": "application/json",
+                    "Authorization": f"Bearer {LINE_ACCESS_TOKEN}"
+                },
+                json={
+                    "replyToken": event.reply_token,
+                    "messages": [{"type": "text", "text": result_text}]
+                }
+            )
+
+            logger.info("✅ 🖼 webhook image flow completed")
             return {"status": "success"}
 
         if mtype == "text":
