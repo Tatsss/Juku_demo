@@ -17,7 +17,7 @@ openai_client = OpenAIClient()
 db = FirestoreDB()
 
 LINE_ACCESS_TOKEN = os.getenv("LINE_ACCESS_TOKEN")
-IMAGE_PROMPT = os.getenv("IMAGE_PROMPT")
+IMAGE_PROMPT = os.getenv("IMAGE_PROMPT", "画像に何が写っているか日本語で説明してください。").strip()
 STICKER_REPLIES = [
     os.getenv("LINE_STICKER_REPLY01", "").strip(),
     os.getenv("LINE_STICKER_REPLY02", "").strip(),
